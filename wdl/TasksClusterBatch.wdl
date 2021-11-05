@@ -357,6 +357,7 @@ task CreatePloidyTableFromPed {
         set -euo pipefail
         python ~{default="/opt/sv-pipeline/scripts/ploidy_table_from_ped.py" script} \
             --ped ~{ped_file} \
+<<<<<<< HEAD
             --out ~{output_prefix}.tsv.tmp \
             --contigs ~{contig_list} \
             ~{"--chr-x " + chr_x} \
@@ -364,6 +365,12 @@ task CreatePloidyTableFromPed {
 
         # TODO : For now we retain female Y genotypes for metric generation
         sed -e 's/\t0/\t1/g' ~{output_prefix}.tsv.tmp > ~{output_prefix}.tsv
+=======
+            --out ~{output_prefix}.tsv \
+            --contigs ~{contig_list} \
+            ~{"--chr-x " + chr_x} \
+            ~{"--chr-y " + chr_y}
+>>>>>>> 83fc6e8 (parent 57f5b05c3837bf9241564722386b6e8ed6c7f160)
     >>>
     runtime {
         cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
@@ -456,12 +463,19 @@ task TarFiles {
 
     command <<<
         set -euo pipefail
+<<<<<<< HEAD
         FILES="~{write_lines(files)}"
         # Note that all filenames must be unique
         awk 'a[$0]++{print "Duplicate file found:",$0; exit(1)}' $FILES
         # Avoids argument limits encountered with ls; uses hard links avoid issues with local file systems
         mkdir files
         cat $FILES | xargs -I{} -n1 ln {} files/
+=======
+        mkdir files
+        # Avoids argument limits encountered with ls; uses hard links avoid issues with local file systems
+        # Note that all filenames must be unique
+        cat ~{write_lines(files)} | xargs -I{} -n1 ln {} files/
+>>>>>>> 83fc6e8 (parent 57f5b05c3837bf9241564722386b6e8ed6c7f160)
         tar czf ~{prefix}.tar.gz -h -C files/ .
     >>>
     output {

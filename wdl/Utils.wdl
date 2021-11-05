@@ -30,7 +30,6 @@ task GetSampleIdsFromVcf {
 
   output {
     File out_file = sample_list
-    Array[String] out_array = read_lines(sample_list)
   }
 
   runtime {
@@ -99,7 +98,7 @@ task GetSampleIdsFromVcfTar {
   RuntimeAttr default_attr = object {
                                cpu_cores: 1,
                                mem_gb: 0.9,
-                               disk_gb: 10 + ceil(size(vcf_tar, "GiB")),
+                               disk_gb: 10 + 2 * ceil(size(vcf_tar, "GiB")),
                                boot_disk_gb: 10,
                                preemptible_tries: 3,
                                max_retries: 1
@@ -108,14 +107,12 @@ task GetSampleIdsFromVcfTar {
 
   command <<<
 
-    set -euo pipefail
-    # Using a named pipe keeps pipefail from triggering
-    mkfifo tmppipe
-    while read f
-    do
-      tar -Ozxf ~{vcf_tar} $f &>2 /dev/null > tmppipe &
-      bcftools query -l tmppipe
-    done < <(tar -tzf ~{vcf_tar} | grep '\.vcf\.gz$') | sort -u > ~{prefix}.txt
+    set -eu
+    mkdir vcfs
+    tar xzf ~{vcf_tar} -C vcfs/
+    for VCF in vcfs/*.vcf.gz; do
+      bcftools query -l $VCF
+    done > ~{prefix}.txt
 
   >>>
 
@@ -130,6 +127,50 @@ task GetSampleIdsFromVcfTar {
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     docker: sv_base_mini_docker
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+  }
+}
+
+task GetSampleIdsFromVcfList {
+  input {
+    File vcf_list
+    String prefix
+    String sv_base_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  RuntimeAttr default_attr = object {
+                               cpu_cores: 1,
+
+                               mem_gb: 0.9,
+                               disk_gb: 100,
+                               boot_disk_gb: 10,
+                               preemptible_tries: 3,
+                               max_retries: 1
+                             }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  command <<<
+    set -euo pipefail
+    mkdir vcfs
+    cat ~{vcf_list} | gsutil -m cp -I vcfs/
+    touch ~{prefix}.txt
+    for VCF in vcfs/*.vcf.gz; do
+      bcftools query -l $VCF >> ~{prefix}.txt
+    done
+  >>>
+
+  output {
+    File out_file = "~{prefix}.txt"
+  }
+
+  runtime {
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    docker: sv_base_docker
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
   }
