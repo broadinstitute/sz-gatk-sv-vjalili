@@ -99,19 +99,25 @@ def fam_info_readin(fam_file):
     return [fam, samp, fa, mo]
 
 
-def process_metadata(variants, bed=False, batch_list=None):
-    if bed:
-        n_samples = len([s.strip() for s in batch_list.readlines()])
-    else:
-        n_samples = len(variants.header.samples)
-
-    # parents = [s for s in samples if _is_parent(s)]
-    # children = [s for s in samples if _is_child(s)]
-    # n_parents = len(parents)
-    # n_children = len(children)
-
+def process_metadata(variants, rd_df):
+    n_samples = len(variants.header.samples)
     called_counts = dict()
     called_samples = dict()
+
+    # Calculate segdup coverage
+    segdups = pbt.BedTool(args.segdups)
+
+    # Check if endpoints are in repeat-masked sequence
+    starts = metadata['chrom start end name'.split()].copy()
+    starts['end'] = starts['start'] + 1
+    ends = metadata['chrom start end name'.split()].copy()
+    ends['start'] = ends['end'] - 1
+    endpoints = pd.concat([starts, ends])
+    rmsk = pbt.BedTool(args.rmsk)
+    sect = bt.intersect(rmsk, u=True)
+    rmasked_names = [i.fields[3] for i in sect.intervals]
+    metadata['rmsk'] = metadata.name.isin(rmasked_names)
+
     for svtype in 'DEL DUP INV BND INS'.split():
         # Counts of variants per sample
         called_counts[svtype] = defaultdict(int)
@@ -121,32 +127,18 @@ def process_metadata(variants, bed=False, batch_list=None):
 
     metadata = deque()
     for variant in variants:
-        # bed record
-        if bed:
-            if variant.startswith('#'):
-                continue
-            data = variant.strip().split()
-            chrom = data[0]
-            start = int(data[1])
-            end = int(data[2])
-            called = data[4].split(',')
-            name = data[3]
-            svtype = data[5]
-            svlen = int(data[2]) - int(data[1])
-        # VCF record
+        chrom = variant.chrom
+        start = variant.pos
+        end = variant.stop
+        called = svu.get_called_samples(variant)
+        name = variant.id
+        svtype = variant.info['SVTYPE']
+        if svtype == 'BND':
+            svlen = -1
+        elif svtype == 'INS':
+            svlen = variant.info.get('SVLEN', -1)
         else:
-            chrom = variant.chrom
-            start = variant.pos
-            end = variant.stop
-            called = svu.get_called_samples(variant)
-            name = variant.id
-            svtype = variant.info['SVTYPE']
-            if svtype == 'BND':
-                svlen = -1
-            elif svtype == 'INS':
-                svlen = variant.info.get('SVLEN', -1)
-            else:
-                svlen = end - start
+            svlen = end - start
 
         # Only use start/end for seg dup coverage. if it's a tloc,
         # we don't care so we can just set its "END" to pos + 1
@@ -163,8 +155,8 @@ def process_metadata(variants, bed=False, batch_list=None):
         # Track called samples for outlier filtering
         called_samples[svtype][name] = set(called)
 
-        dat = [chrom, start, end, name, svtype, svlen, vf]
-        metadata.append(dat)
+        cov = bt.coverage(segdups).to_dataframe()
+        metadata['poor_region_cov'] = cov.thickStart
 
     metadata = np.array(metadata)
     cols = 'chrom start end name svtype svsize vf'.split()
@@ -202,65 +194,28 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-v', '--variants', required=True, help='Default VCF')
     parser.add_argument('-r', '--RDtest')
-    parser.add_argument('-b', '--BAFtest')
-    parser.add_argument('-s', '--SRtest')
-    parser.add_argument('-p', '--PEtest')
-    parser.add_argument('-e', '--PESRtest')
-    parser.add_argument('--batch-list', type=argparse.FileType('r'))
     parser.add_argument('--segdups', required=True)
     parser.add_argument('--rmsk', required=True)
-    parser.add_argument('-d', '--bed', action='store_true', default=False)
     parser.add_argument('fout')
     args = parser.parse_args()
 
-    if args.bed:
-        if not hasattr(args, 'batch_list'):
-            raise Exception('batch list must be specified when passing a bed')
-        variants = open(args.variants)
-        dtypes = 'RD BAF'.split()
+    variants = pysam.VariantFile(args.variants)
+
+    # Parse RDTest table
+    rd_path = getattr(args, 'RDtest')
+    if rd_path is not None:
+        rd_df = pd.read_table(rd_path)
+        rd_df = process_rdtest(rd_df)
+        rd_df = rd_df.rename(columns=lambda c: 'RD_' + c if c != 'name' else c)
+        rd_df = rd_df.set_index('name')
+        #evidence = metadata.join(rd_df, how='outer', sort=True)
     else:
-        variants = pysam.VariantFile(args.variants)
-        dtypes = 'RD PE SR BAF PESR'.split()
+        rd_df = None
 
-    metadata = process_metadata(variants, args.bed, args.batch_list)
-
-    # Calculate segdup coverage
-    bt = pbt.BedTool.from_dataframe(metadata['chrom start end'.split()])
-    segdups = pbt.BedTool(args.segdups)
-    cov = bt.coverage(segdups).to_dataframe()
-    metadata['poor_region_cov'] = cov.thickStart
-
-    # Check if endpoints are in repeat-masked sequence
-    starts = metadata['chrom start end name'.split()].copy()
-    starts['end'] = starts['start'] + 1
-    ends = metadata['chrom start end name'.split()].copy()
-    ends['start'] = ends['end'] - 1
-    endpoints = pd.concat([starts, ends])
-    bt = pbt.BedTool.from_dataframe(endpoints)
-    rmsk = pbt.BedTool(args.rmsk)
-    sect = bt.intersect(rmsk, u=True)
-    rmasked_names = [i.fields[3] for i in sect.intervals]
-    metadata['rmsk'] = metadata.name.isin(rmasked_names)
-
-    metadata = metadata.set_index('name')
+    metadata = process_metadata(variants, rd_df)
 
     evidence = deque()
 
-    for dtype in dtypes:
-        dtable = getattr(args, dtype + 'test')
-        if dtable is None:
-            continue
-
-        df = pd.read_table(dtable)
-
-        df = preprocess(df, dtype)
-        if dtype == 'RD':
-            df = df.rename(columns=lambda c: dtype + '_' + c if c != 'name' else c)
-        df = df.set_index('name')
-        evidence.append(df)
-
-    evidence = list(evidence)
-    evidence = metadata.join(evidence, how='outer', sort=True)
     evidence = evidence.reset_index().rename(columns={'index': 'name'})
 
     # Replace infinite log-pvals

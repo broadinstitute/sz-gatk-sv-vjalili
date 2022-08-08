@@ -142,12 +142,8 @@ workflow GenerateBatchMetricsAlgorithm {
 
 	call AggregateTests {
 		input:
-			vcf = vcf,
+			vcf = GeneratePESRBAFMetrics.out,
 			prefix = "~{batch}.~{algorithm}",
-			petest = VcfToMetricsFile.petest,
-			srtest = VcfToMetricsFile.srtest,
-			baftest = VcfToMetricsFile.baftest,
-			pesrtest = VcfToMetricsFile.pesrtest,
 			rdtest = RDTest.rdtest,
 			segdups = segdups,
 			rmsk = rmsk,
@@ -156,7 +152,8 @@ workflow GenerateBatchMetricsAlgorithm {
 	}
 
 	output {
-		File out = AggregateTests.metrics
+		File out = AggregateTests.out
+		File out_index = AggregateTests.out_index
 	}
 
 }
@@ -270,19 +267,17 @@ task AggregateTests {
 	RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
 	output {
-		File metrics = "~{prefix}.aggregated.metrics"
+		File out = "~{prefix}.vcf.gz"
+		File out_index = "~{prefix}.vcf.gz.tbi"
 	}
 	command <<<
 		/opt/sv-pipeline/02_evidence_assessment/02e_metric_aggregation/scripts/aggregate.py \
 			-v ~{vcf} \
 			~{"-r " + rdtest} \
-			~{"-b " + baftest} \
-			~{"-p " + petest} \
-			~{"-s " + srtest} \
-			~{"-e " + pesrtest} \
 			--segdups ~{segdups} \
 			--rmsk ~{rmsk} \
-			aggregated.metrics
+			~{prefix}.vcf.gz
+		tabix ~{prefix}.vcf.gz
 	>>>
 	runtime {
 		cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
