@@ -10,7 +10,6 @@ from collections import deque, defaultdict
 import numpy as np
 import pandas as pd
 import pysam
-import pybedtools as pbt
 import svtk.utils as svu
 
 
@@ -29,7 +28,7 @@ def process_rdtest(rdtest):
         repl = ['All_samples_called_CNV_no_analysis',
                 'No_samples_for_analysis',
                 'coverage_failure']
-        rdtest[col] = rdtest[col].replace(repl, np.nan).astype(np.float)
+        rdtest[col] = rdtest[col].replace(repl, np.nan).astype(float)
 
     rdtest['log_pval'] = -np.log10(rdtest.P)
     rdtest['log_2ndMaxP'] = -np.log10(rdtest['2ndMaxP'])
@@ -43,80 +42,20 @@ def process_rdtest(rdtest):
     rdtest.log_pval = rdtest.log_pval.abs()
     rdtest.log_2ndMaxP = rdtest.log_2ndMaxP.abs()
 
+    rdtest = rdtest.rename(columns=lambda c: 'RD_' + c if c != 'name' else c)
+    rdtest.set_index('name', inplace=True)
+
     return rdtest
 
 
-def process_srtest(srtest):
-    metrics = 'SRQ SRCS pos'.split()
-    srtest = srtest.pivot(index='name', values=metrics, columns='coord')
-    srtest.columns = ['_'.join(col[::-1]).strip()
-                      for col in srtest.columns.values]
-    srtest = srtest.reset_index()
-    return srtest
+def process_metadata(vcf):
 
+    def _get_dup_called_samples(variant):
+        return [sample for sample in variant.samples if variant.samples[sample]['CN'] > variant.samples[sample]['ECN']]
 
-def process_petest(petest):
-    return petest
-
-
-def process_baftest(baftest):
-    baftest['BAFDEL'] = -baftest.BAFDEL
-    return baftest
-
-
-def preprocess(df, dtype):
-    if dtype == 'RD':
-        return process_rdtest(df)
-    elif dtype == 'SR':
-        return process_srtest(df)
-    elif dtype == 'PE':
-        return process_petest(df)
-    elif dtype == 'BAF':
-        return process_baftest(df)
-    else:
-        return df
-
-
-def _is_parent(s):
-    return s.endswith('fa') or s.endswith('mo')
-
-
-def _is_child(s):
-    return s.endswith('p1') or s.endswith('s1') or s.endswith('pb')
-
-
-def fam_info_readin(fam_file):
-    fin = open(fam_file)
-    # samp_pedi_hash = {}
-    [fam, samp, fa, mo] = [[], [], [], []]
-    for line in fin:
-        pin = line.strip().split()
-        fam.append(pin[0])
-        samp.append(pin[1])
-        fa.append(pin[2])
-        mo.append(pin[3])
-    fin.close()
-    return [fam, samp, fa, mo]
-
-
-def process_metadata(variants, rd_df):
-    n_samples = len(variants.header.samples)
+    n_samples = len(vcf.header.samples)
     called_counts = dict()
     called_samples = dict()
-
-    # Calculate segdup coverage
-    segdups = pbt.BedTool(args.segdups)
-
-    # Check if endpoints are in repeat-masked sequence
-    starts = metadata['chrom start end name'.split()].copy()
-    starts['end'] = starts['start'] + 1
-    ends = metadata['chrom start end name'.split()].copy()
-    ends['start'] = ends['end'] - 1
-    endpoints = pd.concat([starts, ends])
-    rmsk = pbt.BedTool(args.rmsk)
-    sect = bt.intersect(rmsk, u=True)
-    rmasked_names = [i.fields[3] for i in sect.intervals]
-    metadata['rmsk'] = metadata.name.isin(rmasked_names)
 
     for svtype in 'DEL DUP INV BND INS'.split():
         # Counts of variants per sample
@@ -125,14 +64,21 @@ def process_metadata(variants, rd_df):
         # List of variants specific to each sample
         called_samples[svtype] = defaultdict(list)
 
+    stats_int = ['SR1Q', 'SR1CS', 'SR2Q', 'SR2CS', 'SRQ', 'SRCS', 'PE', 'PEQ', 'PESRQ', 'PESRCS']
+    stats_float = ['BAFDEL', 'BAFDUP']
+    rmsk_field = 'NUM_END_OVERLAPS_RMSK'
+    segdup_field = 'OVERLAP_FRAC_SEGDUP'
     metadata = deque()
-    for variant in variants:
+    for variant in vcf:
         chrom = variant.chrom
         start = variant.pos
         end = variant.stop
-        called = svu.get_called_samples(variant)
         name = variant.id
         svtype = variant.info['SVTYPE']
+        if svtype == 'DUP':
+            called = _get_dup_called_samples(variant)
+        else:
+            called = svu.get_called_samples(variant)
         if svtype == 'BND':
             svlen = -1
         elif svtype == 'INS':
@@ -155,12 +101,23 @@ def process_metadata(variants, rd_df):
         # Track called samples for outlier filtering
         called_samples[svtype][name] = set(called)
 
-        cov = bt.coverage(segdups).to_dataframe()
-        metadata['poor_region_cov'] = cov.thickStart
+        # Repeatmasker / segdup track overlap
+        rmsk = variant.info[rmsk_field] > 0
+        segdup = variant.info[segdup_field]
+
+        dat = [chrom, start, end, name, svtype, svlen, vf, rmsk, segdup]
+        dat.extend([int(variant.info[stat]) if stat in variant.info.keys() else None for stat in stats_int])
+        dat.extend([float(variant.info[stat]) if stat in variant.info.keys() else None for stat in stats_float])
+        metadata.append(dat)
 
     metadata = np.array(metadata)
-    cols = 'chrom start end name svtype svsize vf'.split()
+    cols = 'chrom start end name svtype svsize vf rmsk poor_region_cov'.split()
+    cols.extend(stats_int)
+    cols.extend(stats_float)
     metadata = pd.DataFrame(metadata, columns=cols)
+
+    # Invert BAFDEL scores for training
+    metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL'] = -metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL']
 
     # Flag variants specific to outlier samples
     metadata['is_outlier_specific'] = False
@@ -185,6 +142,7 @@ def process_metadata(variants, rd_df):
     for col in 'start end svsize'.split():
         metadata[col] = metadata[col].astype(int)
 
+    metadata.set_index(keys='name', inplace=True)
     return metadata
 
 
@@ -192,37 +150,27 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('-v', '--variants', required=True, help='Default VCF')
-    parser.add_argument('-r', '--RDtest')
-    parser.add_argument('--segdups', required=True)
-    parser.add_argument('--rmsk', required=True)
+    parser.add_argument('-v', '--variants', required=True, help='Input VCF')
+    parser.add_argument('-r', '--rdtest', help='RDtest table')
     parser.add_argument('fout')
     args = parser.parse_args()
 
-    variants = pysam.VariantFile(args.variants)
+    vcf = pysam.VariantFile(args.variants)
+    metadata = process_metadata(vcf)
 
     # Parse RDTest table
-    rd_path = getattr(args, 'RDtest')
+    rd_path = getattr(args, 'rdtest')
     if rd_path is not None:
         rd_df = pd.read_table(rd_path)
         rd_df = process_rdtest(rd_df)
-        rd_df = rd_df.rename(columns=lambda c: 'RD_' + c if c != 'name' else c)
-        rd_df = rd_df.set_index('name')
-        #evidence = metadata.join(rd_df, how='outer', sort=True)
-    else:
-        rd_df = None
-
-    metadata = process_metadata(variants, rd_df)
-
-    evidence = deque()
-
-    evidence = evidence.reset_index().rename(columns={'index': 'name'})
+        evidence = metadata.join(rd_df, how='outer', sort=True)
+        #evidence = evidence.reset_index().rename(columns={'index': 'name'})
 
     # Replace infinite log-pvals
     LOG_CEIL = 300
     evidence = evidence.replace(np.inf, LOG_CEIL)
 
-    evidence.to_csv(args.fout, index=False, sep='\t', na_rep='NA')
+    evidence.to_csv(args.fout, index=True, sep='\t', na_rep='NA')
 
 
 if __name__ == '__main__':

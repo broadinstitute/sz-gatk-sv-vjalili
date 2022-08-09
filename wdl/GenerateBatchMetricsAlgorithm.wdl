@@ -33,6 +33,7 @@ workflow GenerateBatchMetricsAlgorithm {
 
 		String? additional_gatk_args_pesr_metrics
 
+		File reference_dict
 		String chr_x
 		String chr_y
 
@@ -51,7 +52,7 @@ workflow GenerateBatchMetricsAlgorithm {
 		RuntimeAttr? runtime_attr_scatter_pesr_metrics
 		RuntimeAttr? runtime_attr_agg_pesr
 		RuntimeAttr? runtime_override_generate_metrics
-		RuntimeAttr? runtime_attr_vcf_to_metrics
+		RuntimeAttr? runtime_attr_annotate_overlap
 		RuntimeAttr? runtime_attr_aggregate_tests
 
 		RuntimeAttr? runtime_attr_rdtest
@@ -132,12 +133,16 @@ workflow GenerateBatchMetricsAlgorithm {
 		}
 	}
 
-	call VcfToMetricsFile {
+	call SVRegionOverlap {
 		input:
 			vcf = GeneratePESRBAFMetrics.out,
-			prefix = "~{batch}.~{algorithm}",
-			sv_pipeline_docker = sv_pipeline_docker,
-			runtime_attr_override = runtime_attr_vcf_to_metrics
+			vcf_index = GeneratePESRBAFMetrics.out_index,
+			reference_dict = ref_dict,
+			output_prefix = "~{batch}.~{algorithm}.annotate_overlap",
+			region_files = [segdups, rmsk],
+			region_names = ["SEGDUP", "RMSK"],
+			gatk_docker = gatk_docker,
+			runtime_attr_override = runtime_attr_annotate_overlap
 	}
 
 	call AggregateTests {
@@ -145,8 +150,6 @@ workflow GenerateBatchMetricsAlgorithm {
 			vcf = GeneratePESRBAFMetrics.out,
 			prefix = "~{batch}.~{algorithm}",
 			rdtest = RDTest.rdtest,
-			segdups = segdups,
-			rmsk = rmsk,
 			sv_pipeline_docker = sv_pipeline_docker,
 			runtime_attr_override = runtime_attr_aggregate_tests
 	}
@@ -198,17 +201,29 @@ task GetMaleOnlyVariantIDs {
 	}
 }
 
-task VcfToMetricsFile {
+task SVRegionOverlap {
 	input {
 		File vcf
-		String prefix
-		String sv_pipeline_docker
+		File vcf_index
+		File reference_dict
+		String output_prefix
+		Array[File] region_files
+		Array[String] region_names
+
+		String? region_set_rule
+		String? region_merging_rule
+		Int? region_padding
+
+		Boolean? suppress_overlap_fraction
+		Boolean? suppress_endpoint_counts
+
+		String gatk_docker
 		RuntimeAttr? runtime_attr_override
 	}
 
 	RuntimeAttr default_attr = object {
 															 cpu_cores: 1,
-															 mem_gb: 1.0,
+															 mem_gb: 3.75,
 															 disk_gb: 10,
 															 boot_disk_gb: 10,
 															 preemptible_tries: 3,
@@ -216,26 +231,35 @@ task VcfToMetricsFile {
 														 }
 	RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
+	Float mem_gb = select_first([runtime_attr.mem_gb, default_attr.mem_gb])
+	Int java_mem_mb = ceil(mem_gb * 1000 * 0.8)
+
 	output {
-		File srtest = "~{prefix}.sr.metrics"
-		File petest = "~{prefix}.pe.metrics"
-		File baftest = "~{prefix}.baf.metrics"
-		File pesrtest = "~{prefix}.pesr.metrics"
+		File out = "~{output_prefix}.vcf.gz"
+		File out_index = "~{output_prefix}.vcf.gz.tbi"
 	}
 	command <<<
-		/opt/sv-pipeline/scripts/vcf_to_metrics.py \
-			--vcf ~{vcf} \
-			--pe-out ~{prefix}.pe.metrics \
-			--sr-out ~{prefix}.sr.metrics \
-			--pesr-out ~{prefix}.pesr.metrics \
-			--baf-out ~{prefix}.baf.metrics
+
+		set -euo pipefail
+		gatk --java-options -Xmx~{java_mem_mb}M SVRegionOverlap \
+			-V ~{vcf} \
+			-O ~{output_prefix}.vcf.gz \
+			--sequence-dictionary ~{reference_dict} \
+			--region-file ~{sep=" --region-file " region_files} \
+			--region-name ~{sep=" --region-name " region_names} \
+			~{"--region-set-rule " + region_set_rule} \
+			~{"--region-merging-rule " + region_merging_rule} \
+			~{"--region-padding " + region_padding} \
+			~{"--suppress-overlap-fraction " + suppress_overlap_fraction} \
+			~{"--suppress-endpoint-counts " + suppress_endpoint_counts}
+
 	>>>
 	runtime {
 		cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
 		memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
 		disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
 		bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-		docker: sv_pipeline_docker
+		docker: gatk_docker
 		preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
 		maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
 	}
@@ -246,12 +270,6 @@ task AggregateTests {
 		File vcf
 		String prefix
 		File? rdtest
-		File? baftest
-		File? petest
-		File? srtest
-		File? pesrtest
-		File segdups
-		File rmsk
 		String sv_pipeline_docker
 		RuntimeAttr? runtime_attr_override
 	}
@@ -274,8 +292,6 @@ task AggregateTests {
 		/opt/sv-pipeline/02_evidence_assessment/02e_metric_aggregation/scripts/aggregate.py \
 			-v ~{vcf} \
 			~{"-r " + rdtest} \
-			--segdups ~{segdups} \
-			--rmsk ~{rmsk} \
 			~{prefix}.vcf.gz
 		tabix ~{prefix}.vcf.gz
 	>>>
