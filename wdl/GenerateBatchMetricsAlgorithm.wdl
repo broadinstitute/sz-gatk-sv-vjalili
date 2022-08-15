@@ -4,7 +4,6 @@ import "RDTest.wdl" as rdt
 import "BAFTest.wdl" as baft
 import "TasksGenerateBatchMetrics.wdl" as tasksbatchmetrics
 import "Utils.wdl" as util
-import "GenerateBatchMetricsMetrics.wdl" as metrics
 import "GeneratePESRMetrics.wdl" as pesr_metrics
 
 workflow GenerateBatchMetricsAlgorithm {

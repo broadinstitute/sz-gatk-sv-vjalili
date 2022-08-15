@@ -106,8 +106,8 @@ def process_metadata(vcf):
         segdup = variant.info[segdup_field]
 
         dat = [chrom, start, end, name, svtype, svlen, vf, rmsk, segdup]
-        dat.extend([int(variant.info[stat]) if stat in variant.info.keys() else None for stat in stats_int])
-        dat.extend([float(variant.info[stat]) if stat in variant.info.keys() else None for stat in stats_float])
+        dat.extend([int(variant.info[stat]) if stat in variant.info.keys() and variant.info[stat] is not None else None for stat in stats_int])
+        dat.extend([float(variant.info[stat]) if stat in variant.info.keys() and variant.info[stat] is not None else None for stat in stats_float])
         metadata.append(dat)
 
     metadata = np.array(metadata)
@@ -117,7 +117,7 @@ def process_metadata(vcf):
     metadata = pd.DataFrame(metadata, columns=cols)
 
     # Invert BAFDEL scores for training
-    metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL'] = -metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL']
+    # metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL'] = -metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL']
 
     # Flag variants specific to outlier samples
     metadata['is_outlier_specific'] = False

@@ -27,6 +27,9 @@ def adjudicate_BAF(metrics, labeler, name):
     trainable.to_csv('{0}_DEL_trainable.txt'.format(
         name), index=False, sep='\t')
     testable.to_csv('{0}_DEL_testable.txt'.format(name), index=False, sep='\t')
+    print(trainable.loc[trainable.label == 'Pass'].shape)
+    print(trainable.loc[trainable.label == 'Fail'].shape)
+    print(trainable.loc[trainable.label == 'Unlabeled'].shape)
 
     features = 'BAFDEL'.split()
     cutoffs = {'indep': [], 'dep': ['BAFDEL']}
@@ -44,6 +47,10 @@ def adjudicate_BAF(metrics, labeler, name):
     trainable.to_csv('{0}_DUP_trainable.txt'.format(
         name), index=False, sep='\t')
     testable.to_csv('{0}_DUP_testable.txt'.format(name), index=False, sep='\t')
+    print(trainable.loc[trainable.label == 'Pass'].shape)
+    print(trainable.loc[trainable.label == 'Fail'].shape)
+    print(trainable.loc[trainable.label == 'Unlabeled'].shape)
+
     features = 'BAFDUP'.split()
     cutoffs = {'indep': [], 'dep': ['BAFDUP']}
 
@@ -83,8 +90,8 @@ def adjudicate_SR1(metrics):
     trainable = testable.loc[(testable.poor_region_cov < 0.3) &
                              ~testable.chrom.isin(ALLOSOMES) &
                              ~testable.is_outlier_specific.copy()]
-    features = ['sum_SRQ', 'sum_SRCS']
-    cutoffs = {'indep': ['sum_SRQ'], 'dep': ['sum_SRCS']}
+    features = ['SRQ', 'SRCS']
+    cutoffs = {'indep': ['SRQ'], 'dep': ['SRCS']}
     labeler = labelers.SR1TrainingLabeler()
     trainable['label'] = labeler.label(trainable)
     trainable.to_csv('SR1_trainable.txt', index=False, sep='\t')
@@ -315,6 +322,8 @@ def adjudicate_SV(metrics):
     PE_cols = ('PEQ', 'PECS')
     for col in PE_cols:
         metrics.loc[metrics.svtype == 'INS', col] = np.nan
+
+    metrics['is_outlier_specific'] = metrics['is_outlier_specific'].astype(bool)
 
     cutoffs = np.empty(7, dtype=object)
     sys.stderr.write('Adjudicating BAF (1)...\n')

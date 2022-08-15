@@ -4,7 +4,6 @@ import "RDTest.wdl" as rdt
 import "TasksGenerateBatchMetrics.wdl" as tasksbatchmetrics
 import "Utils.wdl" as util
 import "GenerateBatchMetricsAlgorithm.wdl" as gbma
-import "GeneratePESRMetrics.wdl" as pesr_metrics
 import "TestUtils.wdl" as tu
 
 workflow GenerateBatchMetrics {
@@ -182,7 +181,7 @@ workflow GenerateBatchMetrics {
   call AggregateCallers {
     input:
       batch = batch,
-      input_metrics = select_all(flatten(GenerateBatchMetricsAlgorithm.out, [RDTestDepth.rdtest])),
+      input_metrics = select_all(flatten([GenerateBatchMetricsAlgorithm.out, [RDTestDepth.rdtest]])),
       sv_pipeline_base_docker = sv_pipeline_base_docker,
       runtime_attr_override = runtime_attr_aggregate_callers
   }
