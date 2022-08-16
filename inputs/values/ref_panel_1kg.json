@@ -1898,6 +1898,7 @@
         "gs://gatk-sv-ref-panel-1kg/outputs/GATKSVPipelineBatch/38c65ca4-2a07-4805-86b6-214696075fef/call-GatherSampleEvidenceBatch/GatherSampleEvidenceBatch/bb5e70f1-7186-4e29-96f8-dcb9ee000642/call-GatherSampleEvidence/shard-154/GatherSampleEvidence/f5159902-35ad-4e8e-ac76-2e6278ac387f/call-Manta/Manta/b9a4b6eb-5235-47fc-bb9a-a6d1ae62fc5c/call-RunManta/cacheCopy/NA21122.manta.vcf.gz.tbi",
         "gs://gatk-sv-ref-panel-1kg/outputs/GATKSVPipelineBatch/38c65ca4-2a07-4805-86b6-214696075fef/call-GatherSampleEvidenceBatch/GatherSampleEvidenceBatch/bb5e70f1-7186-4e29-96f8-dcb9ee000642/call-GatherSampleEvidence/shard-155/GatherSampleEvidence/9dfac5cf-9a0b-4070-ad5b-2fe087a41856/call-Manta/Manta/1b834e24-f40f-45aa-b892-f79c3f8d2a21/call-RunManta/cacheCopy/NA21133.manta.vcf.gz.tbi"
     ],
+    "mean_coverage_file": "gs://broad-dsde-methods-markw/1kgp/nygc_1kgp_2019.mean_coverage.tsv",
     "medianfile": "gs://gatk-sv-ref-panel-1kg/outputs/GATKSVPipelineBatch/38c65ca4-2a07-4805-86b6-214696075fef/call-GATKSVPipelinePhase1/GATKSVPipelinePhase1/acce2c71-7458-4205-ae13-624f6efc9956/call-GatherBatchEvidence/GatherBatchEvidence/366e817a-feb2-4d3c-915c-a8bd25529b81/call-MedianCov/MedianCov/8ad48479-2e16-4be9-add6-1b47dbd9d95c/call-CalcMedCov/cacheCopy/ref_panel_1kg_medianCov.transposed.bed",
     "melt_vcfs": [
         "gs://gatk-sv-ref-panel-1kg/outputs/GATKSVPipelineBatch/38c65ca4-2a07-4805-86b6-214696075fef/call-GatherSampleEvidenceBatch/GatherSampleEvidenceBatch/bb5e70f1-7186-4e29-96f8-dcb9ee000642/call-GatherSampleEvidence/shard-0/GatherSampleEvidence/bed8ee84-625c-4d39-99d4-20f9c0462ce6/call-MELT/MELT/e88679ca-9417-4c3d-a078-4f1f6097c870/call-RunMELT/cacheCopy/HG00096.melt.vcf.gz",
@@ -2236,6 +2237,7 @@
     "name": "ref_panel_1kg",
     "outlier_cutoff_table": "gs://gatk-sv-resources-public/hg38/v0/sv-resources/ref-panel/1KG/v1/module03_outlier_cutoff_table.tsv",
     "ped_file": "gs://gcp-public-data--broad-references/hg38/v0/sv-resources/ref-panel/1KG/v1/ped/1kg_ref_panel_v1.ped",
+    "ploidy_table": "gs://broad-dsde-methods-markw/1kgp/ref_panel_1kg.ploidy.FEMALE_chrY_1.tsv",
     "qc_definitions": "gs://gatk-sv-ref-panel-1kg/outputs/GATKSVPipelineBatch/38c65ca4-2a07-4805-86b6-214696075fef/ref_panel_1kg.qc_definitions.tsv",
     "qc_file": "gs://gatk-sv-ref-panel-1kg/outputs/GATKSVPipelineBatch/38c65ca4-2a07-4805-86b6-214696075fef/sv_qc.ref_panel_1kg.tsv",
     "raw_sr_background_fail_file": "gs://gatk-sv-ref-panel-1kg/outputs/GATKSVPipelineBatch/38c65ca4-2a07-4805-86b6-214696075fef/call-GenotypeBatch/GenotypeBatch/ad17f522-0950-4f0a-9148-a13f689082ed/call-GenotypePESRPart2/GenotypePESRPart2/ce1f4075-1a3e-44b5-9cfe-bfb701327616/call-TripleStreamCatFail/cacheCopy/ref_panel_1kg.genotype_SR_part2_background_fail.txt",

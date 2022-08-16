@@ -14,9 +14,9 @@ import pandas as pd
 
 def rewrite_SR_coords(record, metrics, pval_cutoff, bg_cutoff):
     row = metrics.loc[record.id]
-    if row.sum_SRQ >= pval_cutoff and row.sum_SRCS >= bg_cutoff:
-        record.pos = int(row.posA_pos)
-        record.stop = int(row.posB_pos)
+    if row.SRQ >= pval_cutoff and row.SRCS >= bg_cutoff:
+        record.pos = int(row.SR1POS)
+        record.stop = int(row.SR2POS)
         if record.info['SVTYPE'] == 'INV':
             record.pos, record.stop = sorted([record.pos, record.stop])
         if record.info['SVTYPE'] not in 'INS BND'.split():
@@ -51,9 +51,9 @@ def main():
     # Load cutoffs
     cutoffs = pd.read_table(args.cutoffs)
     pval_cutoff = cutoffs.loc[(cutoffs['test'] == 'SR1') &
-                              (cutoffs['metric'] == 'sum_SRQ'), 'cutoff'].iloc[0]
+                              (cutoffs['metric'] == 'SRQ'), 'cutoff'].iloc[0]
     bg_cutoff = cutoffs.loc[(cutoffs['test'] == 'SR1') &
-                            (cutoffs['metric'] == 'sum_SRCS'), 'cutoff'].iloc[0]
+                            (cutoffs['metric'] == 'SRCS'), 'cutoff'].iloc[0]
 
     for record in records:
         rewrite_SR_coords(record, metrics, pval_cutoff, bg_cutoff)

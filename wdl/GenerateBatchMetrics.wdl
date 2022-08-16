@@ -20,42 +20,36 @@ workflow GenerateBatchMetrics {
     File sr_file
     File baf_file
     File rd_file
-    File median_file
 
+    File median_file
     File mean_coverage_file
     File ploidy_table
 
     Int records_per_shard_pesr
     Int records_per_shard_depth
 
-    String? additional_gatk_args_pesr_metrics
+    String? additional_gatk_args_agg
+
+    File? svtk_to_gatk_script
 
     String chr_x
     String chr_y
 
-    Float? java_mem_fraction_pesr_metrics
-
-    String gatk_docker
-    String sv_base_mini_docker
-    String sv_pipeline_docker
-    RuntimeAttr? runtime_attr_scatter_pesr_metrics
-    RuntimeAttr? runtime_attr_agg_pesr
-    RuntimeAttr? runtime_override_concat_pesr_metrics
-
-    Int common_cnv_size_cutoff
+    Float? java_mem_fraction
 
     File rmsk
     File segdups
     File ped_file
     File autosome_contigs
     File allosome_contigs
-    File ref_dict
+    File reference_dict
 
     # Module metrics parameters
     # Run module metrics workflow at the end - on by default
     Boolean? run_module_metrics
     File? primary_contigs_list  # required if run_module_metrics = true
 
+    String gatk_docker
     String sv_pipeline_docker
     String sv_pipeline_rdtest_docker
     String sv_base_mini_docker
@@ -69,6 +63,7 @@ workflow GenerateBatchMetrics {
     RuntimeAttr? runtime_attr_aggregate_callers
     RuntimeAttr? runtime_attr_rdtest
     RuntimeAttr? runtime_attr_scatter_vcf
+    RuntimeAttr? runtime_attr_format
     RuntimeAttr? runtime_attr_concat_vcfs
     RuntimeAttr? runtime_attr_agg
     RuntimeAttr? runtime_attr_split_rd_vcf
@@ -104,13 +99,14 @@ workflow GenerateBatchMetrics {
 
   Array[File?] pesr_vcfs_ = [manta_vcf, melt_vcf, scramble_vcf, wham_vcf]
   Array[String] pesr_algorithms_ = ["manta", "melt", "scramble", "wham"]
-  scatter (i in range(length(pesr_vcfs_))) {
+  scatter (i in range(length(pesr_algorithms_))) {
     if (defined(pesr_vcfs_[i])) {
       if (pesr_algorithms_[i] == "manta" || pesr_algorithms_[i] == "wham") {
           File pe_file_ = pe_file
           File baf_file_ = baf_file
           File rd_file_ = rd_file
       }
+
       call gbma.GenerateBatchMetricsAlgorithm {
         input:
           vcf=select_first([pesr_vcfs_[i]]),
@@ -122,18 +118,31 @@ workflow GenerateBatchMetrics {
           rd_file=rd_file_,
           mean_coverage_file=mean_coverage_file,
           median_file=median_file,
+          ped_file=ped_file,
           ploidy_table=ploidy_table,
+          sample_list = GetSampleIdsFromVcf.out_file,
+          male_list = GetSampleLists.male_samples,
+          female_list = GetSampleLists.female_samples,
           records_per_shard_pesr=records_per_shard_pesr,
           records_per_shard_depth=records_per_shard_depth,
-          additional_gatk_args=additional_gatk_args_pesr_metrics,
+          additional_gatk_args=additional_gatk_args_agg,
           chr_x=chr_x,
           chr_y=chr_y,
-          java_mem_fraction=java_mem_fraction_pesr_metrics,
+          rmsk=rmsk,
+          segdups=segdups,
+          autosome_contigs=autosome_contigs,
+          allosome_contigs=allosome_contigs,
+          reference_dict=reference_dict,
+          java_mem_fraction=java_mem_fraction,
+          svtk_to_gatk_script=svtk_to_gatk_script,
           gatk_docker=gatk_docker,
           sv_base_mini_docker=sv_base_mini_docker,
           sv_pipeline_docker=sv_pipeline_docker,
+          sv_pipeline_rdtest_docker=sv_pipeline_rdtest_docker,
+          linux_docker=linux_docker,
           runtime_attr_scatter_vcf=runtime_attr_scatter_vcf,
           runtime_attr_agg=runtime_attr_agg,
+          runtime_attr_format=runtime_attr_format,
           runtime_attr_rdtest=runtime_attr_rdtest,
           runtime_attr_concat_vcfs=runtime_attr_concat_vcfs
       }
@@ -161,9 +170,9 @@ workflow GenerateBatchMetrics {
       split_size = records_per_shard_depth,
       flags = "",
       allosome_contigs = allosome_contigs,
-      ref_dict = ref_dict,
+      ref_dict = reference_dict,
       batch = batch,
-      samples = GetSampleLists.samples_file,
+      samples = GetSampleIdsFromVcf.out_file,
       male_samples = GetSampleLists.male_samples,
       female_samples = GetSampleLists.female_samples,
       male_only_variant_ids = GetMaleOnlyVariantIDsDepth.male_only_variant_ids,
@@ -179,7 +188,7 @@ workflow GenerateBatchMetrics {
   call AggregateCallers {
     input:
       batch = batch,
-      input_metrics = select_all(flatten([GenerateBatchMetricsAlgorithm.out, [RDTestDepth.rdtest]])),
+      input_metrics = flatten([select_all(GenerateBatchMetricsAlgorithm.out), [RDTestDepth.rdtest]]),
       sv_pipeline_base_docker = sv_pipeline_base_docker,
       runtime_attr_override = runtime_attr_aggregate_callers
   }
@@ -224,7 +233,6 @@ task GetSampleLists {
   output {
     File male_samples = "male.list"
     File female_samples = "female.list"
-    File samples_file = "samples.list"
   }
   command <<<
 

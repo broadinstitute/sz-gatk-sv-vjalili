@@ -64,7 +64,7 @@ def process_metadata(vcf):
         # List of variants specific to each sample
         called_samples[svtype] = defaultdict(list)
 
-    stats_int = ['SR1Q', 'SR1CS', 'SR2Q', 'SR2CS', 'SRQ', 'SRCS', 'PEQ', 'PECS', 'PESRQ', 'PESRCS']
+    stats_int = ['SR1Q', 'SR1CS', 'SR2Q', 'SR2CS', 'SRQ', 'SRCS', 'SR1POS', 'SR2POS', 'PEQ', 'PECS', 'PESRQ', 'PESRCS']
     stats_float = ['BAFDEL', 'BAFDUP']
     rmsk_field = 'NUM_END_OVERLAPS_RMSK'
     segdup_field = 'OVERLAP_FRAC_SEGDUP'
@@ -156,15 +156,14 @@ def main():
     args = parser.parse_args()
 
     vcf = pysam.VariantFile(args.variants)
-    metadata = process_metadata(vcf)
+    evidence = process_metadata(vcf)
 
     # Parse RDTest table
     rd_path = getattr(args, 'rdtest')
     if rd_path is not None:
         rd_df = pd.read_table(rd_path)
         rd_df = process_rdtest(rd_df)
-        evidence = metadata.join(rd_df, how='outer', sort=True)
-        #evidence = evidence.reset_index().rename(columns={'index': 'name'})
+        evidence = evidence.join(rd_df, how='outer', sort=True)
 
     # Replace infinite log-pvals
     LOG_CEIL = 300

@@ -17,37 +17,44 @@ workflow GenerateBatchMetricsAlgorithm {
 		File? baf_file
 		File? rd_file  # Runs RdTest iff provided
 
+		File mean_coverage_file
 		File median_file
+		File ped_file
+		File ploidy_table
+
 		File sample_list
 		File female_list
 		File male_list
-		File ped_file
-
-		File mean_coverage_file
-		File ploidy_table
 
 		Int records_per_shard_pesr
 		Int records_per_shard_depth
 
 		String? additional_gatk_args
 
+		File? svtk_to_gatk_script
+
 		File reference_dict
 		String chr_x
 		String chr_y
+
+		File rmsk
+		File segdups
+		File ped_file
+		File autosome_contigs
+		File allosome_contigs
 
 		Float? java_mem_fraction
 
 		String gatk_docker
 		String sv_base_mini_docker
 		String sv_pipeline_docker
-
-
 		String sv_pipeline_docker
 		String sv_pipeline_rdtest_docker
 		String sv_base_mini_docker
 		String linux_docker
 
 		RuntimeAttr? runtime_attr_scatter_vcf
+		RuntimeAttr? runtime_attr_format
 		RuntimeAttr? runtime_attr_agg
 		RuntimeAttr? runtime_attr_annotate_overlap
 		RuntimeAttr? runtime_attr_aggregate_tests
@@ -59,35 +66,51 @@ workflow GenerateBatchMetricsAlgorithm {
 		RuntimeAttr? runtime_attr_merge_stats
 		RuntimeAttr? runtime_attr_get_male_only
 
-		Int common_cnv_size_cutoff
-
-		File rmsk
-		File segdups
-		File ped_file
-		File autosome_contigs
-		File allosome_contigs
-		File ref_dict
-
 		# Module metrics parameters
 		# Run module metrics workflow at the end - on by default
 		Boolean? run_module_metrics
 
 	}
 
+	String prefix = "~{batch}.generate_batch_metrics.~{algorithm}"
+
 	call taskscohort.ScatterVcf {
 		input:
 			vcf=vcf,
 			records_per_shard = records_per_shard_pesr,
-			prefix = "~{batch}.~{algorithm}.scatter_vcf",
+			prefix = "~{prefix}.scatter_vcf",
 			sv_pipeline_docker=sv_pipeline_docker,
 			runtime_attr_override=runtime_attr_scatter_vcf
 	}
 
 	scatter ( i in range(length(ScatterVcf.shards)) ) {
+		call FormatVcfForGatk {
+			input:
+				vcf=ScatterVcf.shards[i],
+				ploidy_table=ploidy_table,
+				output_prefix="~{prefix}.format.shard_~{i}",
+				script=svtk_to_gatk_script,
+				sv_pipeline_docker=sv_pipeline_docker,
+				runtime_attr_override=runtime_attr_format
+		}
+		call SVRegionOverlap {
+			input:
+				vcf = FormatVcfForGatk.out,
+				vcf_index = FormatVcfForGatk.out_index,
+				reference_dict = reference_dict,
+				output_prefix = "~{prefix}.region_overlap.shard_~{i}",
+				region_files = [segdups, rmsk],
+				region_file_indexes = [segdups + ".tbi", rmsk + ".tbi"],
+				region_names = ["SEGDUP", "RMSK"],
+				java_mem_fraction=java_mem_fraction,
+				gatk_docker = gatk_docker,
+				runtime_attr_override = runtime_attr_annotate_overlap
+		}
 		call Aggregate {
 			input:
-				vcf = ScatterVcf.shards[i],
-				output_prefix = "~{batch}.~{algorithm}.aggregate.shard_~{i}",
+				vcf = SVRegionOverlap.out,
+				vcf_index = SVRegionOverlap.out_index,
+				output_prefix = "~{prefix}.aggregate.shard_~{i}",
 				mean_coverage_file = mean_coverage_file,
 				ploidy_table=ploidy_table,
 				pe_file = pe_file,
@@ -107,22 +130,9 @@ workflow GenerateBatchMetricsAlgorithm {
 			vcfs=Aggregate.out,
 			vcfs_idx=Aggregate.out_index,
 			naive=true,
-			outfile_prefix="~{batch}.~{algorithm}.aggregate",
+			outfile_prefix="~{prefix}.concat",
 			sv_base_mini_docker=sv_base_mini_docker,
 			runtime_attr_override=runtime_attr_concat_vcfs
-	}
-
-	call SVRegionOverlap {
-		input:
-			vcf = ConcatVcfs.concat_vcf,
-			vcf_index = ConcatVcfs.concat_vcf_idx,
-			reference_dict = ref_dict,
-			output_prefix = "~{batch}.~{algorithm}.annotate_overlap",
-			region_files = [segdups, rmsk],
-			region_names = ["SEGDUP", "RMSK"],
-			java_mem_fraction=java_mem_fraction,
-			gatk_docker = gatk_docker,
-			runtime_attr_override = runtime_attr_annotate_overlap
 	}
 
 	if (defined(rd_file)) {
@@ -146,7 +156,7 @@ workflow GenerateBatchMetricsAlgorithm {
 				split_size = records_per_shard_depth,
 				flags = "",
 				allosome_contigs = allosome_contigs,
-				ref_dict = ref_dict,
+				ref_dict = reference_dict,
 				batch = batch,
 				samples = sample_list,
 				male_samples = male_list,
@@ -164,9 +174,9 @@ workflow GenerateBatchMetricsAlgorithm {
 
 	call AggregateTests {
 		input:
-			vcf = SVRegionOverlap.out,
-			vcf_index = SVRegionOverlap.out_index,
-			prefix = "~{batch}.~{algorithm}",
+			vcf = ConcatVcfs.concat_vcf,
+			vcf_index = ConcatVcfs.concat_vcf_idx,
+			prefix = "~{prefix}",
 			rdtest = RDTest.rdtest,
 			sv_pipeline_docker = sv_pipeline_docker,
 			runtime_attr_override = runtime_attr_aggregate_tests
@@ -174,7 +184,6 @@ workflow GenerateBatchMetricsAlgorithm {
 
 	output {
 		File out = AggregateTests.out
-		File out_index = AggregateTests.out_index
 	}
 
 }
@@ -182,6 +191,7 @@ workflow GenerateBatchMetricsAlgorithm {
 task Aggregate {
 	input {
 		File vcf
+		File vcf_index
 		String output_prefix
 
 		File mean_coverage_file
@@ -205,6 +215,9 @@ task Aggregate {
 							 localization_optional: true
 						 }
 		sr_file: {
+							 localization_optional: true
+						 }
+		baf_file: {
 							 localization_optional: true
 						 }
 	}
@@ -244,8 +257,8 @@ task Aggregate {
 			-O ~{output_prefix}.vcf.gz \
 			--sample-coverage ~{mean_coverage_file} \
 			--ploidy-table ~{ploidy_table} \
-			--chr-x ~{chr_x} \
-			--chr-y ~{chr_y} \
+			--x-chromosome-name ~{chr_x} \
+			--y-chromosome-name ~{chr_y} \
 			~{"--discordant-pairs-file " + pe_file} \
 			~{"--split-reads-file " + sr_file} \
 			~{"--baf-file " + baf_file} \
@@ -275,7 +288,7 @@ task GetMaleOnlyVariantIDs {
 	RuntimeAttr default_attr = object {
 															 cpu_cores: 1,
 															 mem_gb: 3.75,
-															 disk_gb: 10,
+															 disk_gb: ceil(10 + size(vcf, "GB")),
 															 boot_disk_gb: 10,
 															 preemptible_tries: 3,
 															 max_retries: 1
@@ -302,6 +315,53 @@ task GetMaleOnlyVariantIDs {
 	}
 }
 
+task FormatVcfForGatk {
+	input {
+		File vcf
+		File ploidy_table
+		File? script
+		String? remove_infos
+		String? remove_formats
+		String output_prefix
+		String sv_pipeline_docker
+		RuntimeAttr? runtime_attr_override
+	}
+
+	RuntimeAttr default_attr = object {
+															 cpu_cores: 1,
+															 mem_gb: 3.75,
+															 disk_gb: ceil(10 + size(vcf, "GB") * 2.0),
+															 boot_disk_gb: 10,
+															 preemptible_tries: 3,
+															 max_retries: 1
+														 }
+	RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+	output {
+		File out = "~{output_prefix}.vcf.gz"
+		File out_index = "~{output_prefix}.vcf.gz.tbi"
+	}
+	command <<<
+		set -euo pipefail
+		python ~{default="/opt/sv-pipeline/scripts/format_svtk_vcf_for_gatk.py" script} \
+			--vcf ~{vcf} \
+			--out ~{output_prefix}.vcf.gz \
+			--ploidy-table ~{ploidy_table} \
+			~{"--remove-infos " + remove_infos} \
+			~{"--remove-formats " + remove_formats}
+		tabix ~{output_prefix}.vcf.gz
+	>>>
+	runtime {
+		cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+		memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
+		disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+		bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+		docker: sv_pipeline_docker
+		preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+		maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+	}
+}
+
 task SVRegionOverlap {
 	input {
 		File vcf
@@ -309,6 +369,7 @@ task SVRegionOverlap {
 		File reference_dict
 		String output_prefix
 		Array[File] region_files
+		Array[File] region_file_indexes
 		Array[String] region_names
 
 		String? region_set_rule
@@ -327,7 +388,7 @@ task SVRegionOverlap {
 	RuntimeAttr default_attr = object {
 															 cpu_cores: 1,
 															 mem_gb: 3.75,
-															 disk_gb: 10,
+															 disk_gb: ceil(10 + size(vcf, "GB") * 2.0),
 															 boot_disk_gb: 10,
 															 preemptible_tries: 3,
 															 max_retries: 1
@@ -392,7 +453,7 @@ task AggregateTests {
 	RuntimeAttr default_attr = object {
 															 cpu_cores: 1,
 															 mem_gb: 7.5,
-															 disk_gb: 10,
+															 disk_gb: ceil(50 + size(vcf, "GB")),
 															 boot_disk_gb: 10,
 															 preemptible_tries: 3,
 															 max_retries: 1
@@ -400,15 +461,13 @@ task AggregateTests {
 	RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
 	output {
-		File out = "~{prefix}.vcf.gz"
-		File out_index = "~{prefix}.vcf.gz.tbi"
+		File out = "~{prefix}.metrics.tsv"
 	}
 	command <<<
 		/opt/sv-pipeline/02_evidence_assessment/02e_metric_aggregation/scripts/aggregate.py \
 			-v ~{vcf} \
 			~{"-r " + rdtest} \
-			~{prefix}.vcf.gz
-		tabix ~{prefix}.vcf.gz
+			~{prefix}.metrics.tsv
 	>>>
 	runtime {
 		cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
