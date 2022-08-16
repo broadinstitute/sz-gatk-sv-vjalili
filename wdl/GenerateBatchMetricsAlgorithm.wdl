@@ -3,8 +3,8 @@ version 1.0
 import "RDTest.wdl" as rdt
 import "BAFTest.wdl" as baft
 import "TasksGenerateBatchMetrics.wdl" as tasksbatchmetrics
+import "TasksMakeCohortVcf.wdl" as taskscohort
 import "Utils.wdl" as util
-import "GeneratePESRMetrics.wdl" as pesr_metrics
 
 workflow GenerateBatchMetricsAlgorithm {
 	input {
@@ -12,13 +12,12 @@ workflow GenerateBatchMetricsAlgorithm {
 		String algorithm
 
 		File vcf
-
 		File? pe_file
 		File? sr_file
 		File? baf_file
-		File? coveragefile
+		File? rd_file  # Runs RdTest iff provided
 
-		File medianfile
+		File median_file
 		File sample_list
 		File female_list
 		File male_list
@@ -30,13 +29,13 @@ workflow GenerateBatchMetricsAlgorithm {
 		Int records_per_shard_pesr
 		Int records_per_shard_depth
 
-		String? additional_gatk_args_pesr_metrics
+		String? additional_gatk_args
 
 		File reference_dict
 		String chr_x
 		String chr_y
 
-		Float? java_mem_fraction_pesr_metrics
+		Float? java_mem_fraction
 
 		String gatk_docker
 		String sv_base_mini_docker
@@ -48,11 +47,11 @@ workflow GenerateBatchMetricsAlgorithm {
 		String sv_base_mini_docker
 		String linux_docker
 
-		RuntimeAttr? runtime_attr_scatter_pesr_metrics
-		RuntimeAttr? runtime_attr_agg_pesr
-		RuntimeAttr? runtime_override_generate_metrics
+		RuntimeAttr? runtime_attr_scatter_vcf
+		RuntimeAttr? runtime_attr_agg
 		RuntimeAttr? runtime_attr_annotate_overlap
 		RuntimeAttr? runtime_attr_aggregate_tests
+		RuntimeAttr? runtime_attr_concat_vcfs
 
 		RuntimeAttr? runtime_attr_rdtest
 		RuntimeAttr? runtime_attr_split_rd_vcf
@@ -75,27 +74,58 @@ workflow GenerateBatchMetricsAlgorithm {
 
 	}
 
-	call pesr_metrics.GeneratePESRBAFMetrics {
+	call taskscohort.ScatterVcf {
 		input:
 			vcf=vcf,
-			prefix="~{batch}.generate_pesr_metrics.manta",
-			mean_coverage_file=mean_coverage_file,
-			ploidy_table=ploidy_table,
-			pe_file=pe_file,
-			sr_file=sr_file,
-			baf_file=baf_file,
-			records_per_shard=records_per_shard_pesr,
-			additional_gatk_args=additional_gatk_args_pesr_metrics,
-			chr_x=chr_x,
-			chr_y=chr_y,
-			java_mem_fraction=java_mem_fraction_pesr_metrics,
-			gatk_docker=gatk_docker,
-			sv_base_mini_docker=sv_base_mini_docker,
+			records_per_shard = records_per_shard_pesr,
+			prefix = "~{batch}.~{algorithm}.scatter_vcf",
 			sv_pipeline_docker=sv_pipeline_docker,
-			runtime_override_concat=runtime_override_generate_metrics
+			runtime_attr_override=runtime_attr_scatter_vcf
 	}
 
-	if (defined(coveragefile)) {
+	scatter ( i in range(length(ScatterVcf.shards)) ) {
+		call Aggregate {
+			input:
+				vcf = ScatterVcf.shards[i],
+				output_prefix = "~{batch}.~{algorithm}.aggregate.shard_~{i}",
+				mean_coverage_file = mean_coverage_file,
+				ploidy_table=ploidy_table,
+				pe_file = pe_file,
+				sr_file = sr_file,
+				baf_file = baf_file,
+				chr_x = chr_x,
+				chr_y = chr_y,
+				additional_args=additional_gatk_args,
+				java_mem_fraction = java_mem_fraction,
+				gatk_docker = gatk_docker,
+				runtime_attr_override = runtime_attr_agg
+		}
+	}
+
+	call taskscohort.ConcatVcfs {
+		input:
+			vcfs=Aggregate.out,
+			vcfs_idx=Aggregate.out_index,
+			naive=true,
+			outfile_prefix="~{batch}.~{algorithm}.aggregate",
+			sv_base_mini_docker=sv_base_mini_docker,
+			runtime_attr_override=runtime_attr_concat_vcfs
+	}
+
+	call SVRegionOverlap {
+		input:
+			vcf = ConcatVcfs.concat_vcf,
+			vcf_index = ConcatVcfs.concat_vcf_idx,
+			reference_dict = ref_dict,
+			output_prefix = "~{batch}.~{algorithm}.annotate_overlap",
+			region_files = [segdups, rmsk],
+			region_names = ["SEGDUP", "RMSK"],
+			java_mem_fraction=java_mem_fraction,
+			gatk_docker = gatk_docker,
+			runtime_attr_override = runtime_attr_annotate_overlap
+	}
+
+	if (defined(rd_file)) {
 		call GetMaleOnlyVariantIDs {
 			input:
 				vcf = vcf,
@@ -109,8 +139,8 @@ workflow GenerateBatchMetricsAlgorithm {
 			input:
 				vcf = vcf,
 				algorithm = algorithm,
-				coveragefile = coveragefile,
-				medianfile = medianfile,
+				coveragefile = select_first([rd_file]),
+				medianfile = median_file,
 				ped_file = ped_file,
 				autosome_contigs = autosome_contigs,
 				split_size = records_per_shard_depth,
@@ -132,21 +162,10 @@ workflow GenerateBatchMetricsAlgorithm {
 		}
 	}
 
-	call SVRegionOverlap {
-		input:
-			vcf = GeneratePESRBAFMetrics.out,
-			vcf_index = GeneratePESRBAFMetrics.out_index,
-			reference_dict = ref_dict,
-			output_prefix = "~{batch}.~{algorithm}.annotate_overlap",
-			region_files = [segdups, rmsk],
-			region_names = ["SEGDUP", "RMSK"],
-			gatk_docker = gatk_docker,
-			runtime_attr_override = runtime_attr_annotate_overlap
-	}
-
 	call AggregateTests {
 		input:
-			vcf = GeneratePESRBAFMetrics.out,
+			vcf = SVRegionOverlap.out,
+			vcf_index = SVRegionOverlap.out_index,
 			prefix = "~{batch}.~{algorithm}",
 			rdtest = RDTest.rdtest,
 			sv_pipeline_docker = sv_pipeline_docker,
@@ -158,6 +177,89 @@ workflow GenerateBatchMetricsAlgorithm {
 		File out_index = AggregateTests.out_index
 	}
 
+}
+
+task Aggregate {
+	input {
+		File vcf
+		String output_prefix
+
+		File mean_coverage_file
+		File ploidy_table
+		File? pe_file
+		File? sr_file
+		File? baf_file
+
+		String chr_x
+		String chr_y
+
+		String? additional_args
+
+		Float? java_mem_fraction
+		String gatk_docker
+		RuntimeAttr? runtime_attr_override
+	}
+
+	parameter_meta {
+		pe_file: {
+							 localization_optional: true
+						 }
+		sr_file: {
+							 localization_optional: true
+						 }
+	}
+
+	RuntimeAttr default_attr = object {
+															 cpu_cores: 1,
+															 mem_gb: 3.75,
+															 disk_gb: ceil(10 + size(vcf, "GB") * 2.5),
+															 boot_disk_gb: 10,
+															 preemptible_tries: 3,
+															 max_retries: 1
+														 }
+	RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+	output {
+		File out = "~{output_prefix}.vcf.gz"
+		File out_index = "~{output_prefix}.vcf.gz.tbi"
+	}
+	command <<<
+		set -euo pipefail
+
+		function getJavaMem() {
+			# get JVM memory in MiB by getting total memory from /proc/meminfo
+			# and multiplying by java_mem_fraction
+			cat /proc/meminfo \
+				| awk -v MEM_FIELD="$1" '{
+					f[substr($1, 1, length($1)-1)] = $2
+				} END {
+					printf "%dM", f[MEM_FIELD] * ~{default="0.85" java_mem_fraction} / 1024
+				}'
+		}
+		JVM_MAX_MEM=$(getJavaMem MemTotal)
+		echo "JVM memory: $JVM_MAX_MEM"
+
+		gatk --java-options "-Xmx${JVM_MAX_MEM}" AggregatePairedEndAndSplitReadEvidence \
+			-V ~{vcf} \
+			-O ~{output_prefix}.vcf.gz \
+			--sample-coverage ~{mean_coverage_file} \
+			--ploidy-table ~{ploidy_table} \
+			--chr-x ~{chr_x} \
+			--chr-y ~{chr_y} \
+			~{"--discordant-pairs-file " + pe_file} \
+			~{"--split-reads-file " + sr_file} \
+			~{"--baf-file " + baf_file} \
+			~{additional_args}
+	>>>
+	runtime {
+		cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+		memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
+		disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+		bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+		docker: gatk_docker
+		preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+		maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+	}
 }
 
 task GetMaleOnlyVariantIDs {
@@ -216,6 +318,8 @@ task SVRegionOverlap {
 		Boolean? suppress_overlap_fraction
 		Boolean? suppress_endpoint_counts
 
+		Float? java_mem_fraction
+
 		String gatk_docker
 		RuntimeAttr? runtime_attr_override
 	}
@@ -230,9 +334,6 @@ task SVRegionOverlap {
 														 }
 	RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
-	Float mem_gb = select_first([runtime_attr.mem_gb, default_attr.mem_gb])
-	Int java_mem_mb = ceil(mem_gb * 1000 * 0.8)
-
 	output {
 		File out = "~{output_prefix}.vcf.gz"
 		File out_index = "~{output_prefix}.vcf.gz.tbi"
@@ -240,7 +341,21 @@ task SVRegionOverlap {
 	command <<<
 
 		set -euo pipefail
-		gatk --java-options -Xmx~{java_mem_mb}M SVRegionOverlap \
+
+		function getJavaMem() {
+			# get JVM memory in MiB by getting total memory from /proc/meminfo
+			# and multiplying by java_mem_fraction
+			cat /proc/meminfo \
+				| awk -v MEM_FIELD="$1" '{
+					f[substr($1, 1, length($1)-1)] = $2
+				} END {
+					printf "%dM", f[MEM_FIELD] * ~{default="0.85" java_mem_fraction} / 1024
+				}'
+			}
+		JVM_MAX_MEM=$(getJavaMem MemTotal)
+		echo "JVM memory: $JVM_MAX_MEM"
+
+		gatk --java-options "-Xmx${JVM_MAX_MEM}" SVRegionOverlap \
 			-V ~{vcf} \
 			-O ~{output_prefix}.vcf.gz \
 			--sequence-dictionary ~{reference_dict} \
@@ -249,8 +364,8 @@ task SVRegionOverlap {
 			~{"--region-set-rule " + region_set_rule} \
 			~{"--region-merging-rule " + region_merging_rule} \
 			~{"--region-padding " + region_padding} \
-			~{"--suppress-overlap-fraction " + suppress_overlap_fraction} \
-			~{"--suppress-endpoint-counts " + suppress_endpoint_counts}
+			--suppress-overlap-fraction ~{default="false" suppress_overlap_fraction} \
+			--suppress-endpoint-counts ~{default="false" suppress_endpoint_counts}
 
 	>>>
 	runtime {
@@ -267,6 +382,7 @@ task SVRegionOverlap {
 task AggregateTests {
 	input {
 		File vcf
+		File vcf_index
 		String prefix
 		File? rdtest
 		String sv_pipeline_docker

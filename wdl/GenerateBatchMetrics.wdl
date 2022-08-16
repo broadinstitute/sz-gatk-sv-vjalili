@@ -19,7 +19,7 @@ workflow GenerateBatchMetrics {
     File pe_file
     File sr_file
     File baf_file
-    File coverage_file
+    File rd_file
     File median_file
 
     File mean_coverage_file
@@ -66,18 +66,13 @@ workflow GenerateBatchMetrics {
     RuntimeAttr? runtime_attr_ids_from_vcf
     RuntimeAttr? runtime_attr_subset_ped
     RuntimeAttr? runtime_attr_sample_list
-    RuntimeAttr? runtime_attr_baf_samples
-    RuntimeAttr? runtime_attr_aggregate_tests
     RuntimeAttr? runtime_attr_aggregate_callers
-    RuntimeAttr? runtime_attr_petest
-    RuntimeAttr? runtime_attr_srtest
     RuntimeAttr? runtime_attr_rdtest
-    RuntimeAttr? runtime_attr_baftest
-    RuntimeAttr? runtime_attr_split_vcf
+    RuntimeAttr? runtime_attr_scatter_vcf
+    RuntimeAttr? runtime_attr_concat_vcfs
+    RuntimeAttr? runtime_attr_agg
     RuntimeAttr? runtime_attr_split_rd_vcf
-    RuntimeAttr? runtime_attr_split_baf_vcf
     RuntimeAttr? runtime_attr_merge_allo
-    RuntimeAttr? runtime_attr_merge_baf
     RuntimeAttr? runtime_attr_merge_stats
     RuntimeAttr? runtime_attr_get_male_only
     RuntimeAttr? runtime_attr_metrics_file_metrics
@@ -110,24 +105,26 @@ workflow GenerateBatchMetrics {
   Array[File?] pesr_vcfs_ = [manta_vcf, melt_vcf, scramble_vcf, wham_vcf]
   Array[String] pesr_algorithms_ = ["manta", "melt", "scramble", "wham"]
   scatter (i in range(length(pesr_vcfs_))) {
-    if (defined(manta_vcf)) {
+    if (defined(pesr_vcfs_[i])) {
       if (pesr_algorithms_[i] == "manta" || pesr_algorithms_[i] == "wham") {
           File pe_file_ = pe_file
           File baf_file_ = baf_file
-          File coverage_file_ = coverage_file
+          File rd_file_ = rd_file
       }
       call gbma.GenerateBatchMetricsAlgorithm {
         input:
-          vcf=select_first([manta_vcf]),
+          vcf=select_first([pesr_vcfs_[i]]),
           batch=batch,
-          algorithm="manta",
+          algorithm=pesr_algorithms_[i],
           pe_file=pe_file_,
           sr_file=sr_file,
           baf_file=baf_file_,
-          coverage_file=coverage_file_,
+          rd_file=rd_file_,
           mean_coverage_file=mean_coverage_file,
+          median_file=median_file,
           ploidy_table=ploidy_table,
-          records_per_shard=records_per_shard_pesr,
+          records_per_shard_pesr=records_per_shard_pesr,
+          records_per_shard_depth=records_per_shard_depth,
           additional_gatk_args=additional_gatk_args_pesr_metrics,
           chr_x=chr_x,
           chr_y=chr_y,
@@ -135,9 +132,10 @@ workflow GenerateBatchMetrics {
           gatk_docker=gatk_docker,
           sv_base_mini_docker=sv_base_mini_docker,
           sv_pipeline_docker=sv_pipeline_docker,
-          runtime_attr_scatter=runtime_attr_scatter_pesr_metrics,
-          runtime_attr_agg_pesr=runtime_attr_agg_pesr,
-          runtime_override_concat=runtime_override_concat_pesr_metrics
+          runtime_attr_scatter_vcf=runtime_attr_scatter_vcf,
+          runtime_attr_agg=runtime_attr_agg,
+          runtime_attr_rdtest=runtime_attr_rdtest,
+          runtime_attr_concat_vcfs=runtime_attr_concat_vcfs
       }
     }
   }
@@ -145,8 +143,8 @@ workflow GenerateBatchMetrics {
   call gbma.GetMaleOnlyVariantIDs as GetMaleOnlyVariantIDsDepth {
     input:
       vcf = depth_vcf,
-      female_samples = GetSampleLists.female_list,
-      male_samples = GetSampleLists.male_list,
+      female_samples = GetSampleLists.female_samples,
+      male_samples = GetSampleLists.male_samples,
       contig = select_first([chr_x, "chrX"]),
       sv_pipeline_docker = sv_pipeline_docker,
       runtime_attr_override = runtime_attr_get_male_only
@@ -154,28 +152,28 @@ workflow GenerateBatchMetrics {
 
   call rdt.RDTest as RDTestDepth {
     input:
-    vcf = depth_vcf,
-    algorithm = "depth",
-    coveragefile = coverage_file,
-    medianfile = median_file,
-    ped_file = SubsetPedFile.ped_subset_file,
-    autosome_contigs = autosome_contigs,
-    split_size = records_per_shard_depth,
-    flags = "",
-    allosome_contigs = allosome_contigs,
-    ref_dict = ref_dict,
-    batch = batch,
-    samples = GetSampleLists.samples_file,
-    male_samples = GetSampleLists.male_samples,
-    female_samples = GetSampleLists.female_samples,
-    male_only_variant_ids = GetMaleOnlyVariantIDsDepth.male_only_variant_ids,
-    sv_pipeline_docker = sv_pipeline_docker,
-    sv_pipeline_rdtest_docker = sv_pipeline_rdtest_docker,
-    linux_docker = linux_docker,
-    runtime_attr_rdtest = runtime_attr_rdtest,
-    runtime_attr_split_rd_vcf = runtime_attr_split_rd_vcf,
-    runtime_attr_merge_allo = runtime_attr_merge_allo,
-    runtime_attr_merge_stats = runtime_attr_merge_stats
+      vcf = depth_vcf,
+      algorithm = "depth",
+      coveragefile = rd_file,
+      medianfile = median_file,
+      ped_file = SubsetPedFile.ped_subset_file,
+      autosome_contigs = autosome_contigs,
+      split_size = records_per_shard_depth,
+      flags = "",
+      allosome_contigs = allosome_contigs,
+      ref_dict = ref_dict,
+      batch = batch,
+      samples = GetSampleLists.samples_file,
+      male_samples = GetSampleLists.male_samples,
+      female_samples = GetSampleLists.female_samples,
+      male_only_variant_ids = GetMaleOnlyVariantIDsDepth.male_only_variant_ids,
+      sv_pipeline_docker = sv_pipeline_docker,
+      sv_pipeline_rdtest_docker = sv_pipeline_rdtest_docker,
+      linux_docker = linux_docker,
+      runtime_attr_rdtest = runtime_attr_rdtest,
+      runtime_attr_split_rd_vcf = runtime_attr_split_rd_vcf,
+      runtime_attr_merge_allo = runtime_attr_merge_allo,
+      runtime_attr_merge_stats = runtime_attr_merge_stats
   }
 
   call AggregateCallers {
