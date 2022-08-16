@@ -64,7 +64,7 @@ def process_metadata(vcf):
         # List of variants specific to each sample
         called_samples[svtype] = defaultdict(list)
 
-    stats_int = ['SR1Q', 'SR1CS', 'SR2Q', 'SR2CS', 'SRQ', 'SRCS', 'PE', 'PEQ', 'PESRQ', 'PESRCS']
+    stats_int = ['SR1Q', 'SR1CS', 'SR2Q', 'SR2CS', 'SRQ', 'SRCS', 'PEQ', 'PECS', 'PESRQ', 'PESRCS']
     stats_float = ['BAFDEL', 'BAFDUP']
     rmsk_field = 'NUM_END_OVERLAPS_RMSK'
     segdup_field = 'OVERLAP_FRAC_SEGDUP'
