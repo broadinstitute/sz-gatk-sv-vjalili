@@ -42,7 +42,7 @@ workflow FilterOutlierSamples {
   call ExcludeOutliers {
     input:
       vcf = vcf,
-      outliers_list = IdentifyOutlierSamples.outlier_samples_list,
+      outliers_list = IdentifyOutlierSamples.outlier_samples_file,
       outfile = "${name}.outliers_removed.vcf.gz",
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_attr_exclude_outliers
@@ -58,8 +58,8 @@ workflow FilterOutlierSamples {
   # Write new list of samples without outliers
   call FilterSampleList {
     input:
-      original_samples = GetSampleIdsFromVcf.out_array,
-      outlier_samples = IdentifyOutlierSamples.outlier_samples_list,
+      original_samples = GetSampleIdsFromVcf.out_file,
+      outlier_samples = IdentifyOutlierSamples.outlier_samples_file,
       batch = name,
       linux_docker = linux_docker,
       runtime_attr_override = runtime_attr_filter_samples
@@ -67,9 +67,7 @@ workflow FilterOutlierSamples {
 
   output {
     File outlier_filtered_vcf = ExcludeOutliers.vcf_no_outliers
-    Array[String] filtered_samples_list = FilterSampleList.filtered_samples_list
     File filtered_samples_file = FilterSampleList.filtered_samples_file
-    Array[String] outlier_samples_excluded = IdentifyOutlierSamples.outlier_samples_list
     File outlier_samples_excluded_file = IdentifyOutlierSamples.outlier_samples_file
     File sv_counts_file = IdentifyOutlierSamples.sv_counts_file
   }
@@ -80,7 +78,7 @@ workflow FilterOutlierSamples {
 task ExcludeOutliers {
   input {
     File vcf
-    Array[String] outliers_list
+    File outliers_list
     String outfile
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
@@ -103,7 +101,7 @@ task ExcludeOutliers {
   command <<<
 
     set -eu
-    OUTLIERS=~{write_lines(outliers_list)}
+    OUTLIERS=~{outliers_list}
     if [ $( wc -c < $OUTLIERS ) -gt 1 ]; then
       zcat ~{vcf} | fgrep "#" | fgrep -v "##" \
        | sed 's/\t/\n/g' | awk -v OFS="\t" '{ print $1, NR }' \
@@ -134,8 +132,8 @@ task ExcludeOutliers {
 # Write new list of samples per batch after outlier filtering
 task FilterSampleList {
   input {
-    Array[String] original_samples
-    Array[String] outlier_samples
+    File original_samples
+    File outlier_samples
     String batch
     String linux_docker
     RuntimeAttr? runtime_attr_override
@@ -157,7 +155,7 @@ task FilterSampleList {
   }
   command <<<
 
-    fgrep -wvf ~{write_lines(outlier_samples)} ~{write_lines(original_samples)} > ~{batch}.outliers_excluded.samples.list
+    fgrep -wvf ~{outlier_samples} ~{original_samples} > ~{batch}.outliers_excluded.samples.list
   
   >>>
   runtime {
