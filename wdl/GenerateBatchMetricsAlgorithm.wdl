@@ -106,7 +106,7 @@ workflow GenerateBatchMetricsAlgorithm {
 				gatk_docker = gatk_docker,
 				runtime_attr_override = runtime_attr_annotate_overlap
 		}
-		call Aggregate {
+		call AggregateSVEvidence {
 			input:
 				vcf = SVRegionOverlap.out,
 				vcf_index = SVRegionOverlap.out_index,
@@ -114,8 +114,11 @@ workflow GenerateBatchMetricsAlgorithm {
 				mean_coverage_file = mean_coverage_file,
 				ploidy_table=ploidy_table,
 				pe_file = pe_file,
+				pe_file_index = if defined(pe_file) then select_first([pe_file]) + ".tbi" else pe_file,
 				sr_file = sr_file,
+				sr_file_index = if defined(sr_file) then select_first([sr_file]) + ".tbi" else sr_file,
 				baf_file = baf_file,
+				baf_file_index = if defined(baf_file) then select_first([baf_file]) + ".tbi" else baf_file,
 				chr_x = chr_x,
 				chr_y = chr_y,
 				additional_args=additional_gatk_args,
@@ -127,8 +130,8 @@ workflow GenerateBatchMetricsAlgorithm {
 
 	call taskscohort.ConcatVcfs {
 		input:
-			vcfs=Aggregate.out,
-			vcfs_idx=Aggregate.out_index,
+			vcfs=AggregateSVEvidence.out,
+			vcfs_idx=AggregateSVEvidence.out_index,
 			naive=true,
 			outfile_prefix="~{prefix}.concat",
 			sv_base_mini_docker=sv_base_mini_docker,
@@ -188,7 +191,7 @@ workflow GenerateBatchMetricsAlgorithm {
 
 }
 
-task Aggregate {
+task AggregateSVEvidence {
 	input {
 		File vcf
 		File vcf_index
@@ -197,8 +200,11 @@ task Aggregate {
 		File mean_coverage_file
 		File ploidy_table
 		File? pe_file
+		File? pe_file_index
 		File? sr_file
+		File? sr_file_index
 		File? baf_file
+		File? baf_file_index
 
 		String chr_x
 		String chr_y
@@ -210,22 +216,10 @@ task Aggregate {
 		RuntimeAttr? runtime_attr_override
 	}
 
-	parameter_meta {
-		pe_file: {
-							 localization_optional: true
-						 }
-		sr_file: {
-							 localization_optional: true
-						 }
-		baf_file: {
-							 localization_optional: true
-						 }
-	}
-
 	RuntimeAttr default_attr = object {
-															 cpu_cores: 1,
-															 mem_gb: 3.75,
-															 disk_gb: ceil(10 + size(vcf, "GB") * 2.5),
+															 cpu_cores: 4,
+															 mem_gb: 15,
+															 disk_gb: ceil(100 + size(vcf, "GB") * 2.5 + size([pe_file, sr_file, baf_file], "GB")),
 															 boot_disk_gb: 10,
 															 preemptible_tries: 3,
 															 max_retries: 1
@@ -252,7 +246,7 @@ task Aggregate {
 		JVM_MAX_MEM=$(getJavaMem MemTotal)
 		echo "JVM memory: $JVM_MAX_MEM"
 
-		gatk --java-options "-Xmx${JVM_MAX_MEM}" AggregatePairedEndAndSplitReadEvidence \
+		gatk --java-options "-Xmx${JVM_MAX_MEM}" AggregateSVEvidence \
 			-V ~{vcf} \
 			-O ~{output_prefix}.vcf.gz \
 			--sample-coverage ~{mean_coverage_file} \
