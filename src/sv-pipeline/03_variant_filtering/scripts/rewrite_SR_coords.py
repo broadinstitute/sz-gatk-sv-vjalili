@@ -10,13 +10,14 @@ import argparse
 import sys
 import pysam
 import pandas as pd
+import numpy as np
 
 
 def rewrite_SR_coords(record, metrics, pval_cutoff, bg_cutoff):
     row = metrics.loc[record.id]
     if row.SRQ >= pval_cutoff and row.SRCS >= bg_cutoff:
-        record.pos = int(row.SR1POS)
-        record.stop = int(row.SR2POS)
+        record.pos = int(row.SR1POS) if row.SR1POS and not np.isnan(row.SR1POS) else record.pos
+        record.stop = int(row.SR2POS) if row.SR2POS and not np.isnan(row.SR2POS) else record.stop
         if record.info['SVTYPE'] == 'INV':
             record.pos, record.stop = sorted([record.pos, record.stop])
         if record.info['SVTYPE'] not in 'INS BND'.split():

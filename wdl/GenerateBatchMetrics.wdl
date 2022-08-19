@@ -25,8 +25,9 @@ workflow GenerateBatchMetrics {
     File mean_coverage_file
     File ploidy_table
 
-    Int records_per_shard_pesr
-    Int records_per_shard_depth
+    Int records_per_shard_agg
+    Int records_per_shard_agg_sr
+    Int records_per_shard_rdtest
 
     String? additional_gatk_args_agg
 
@@ -98,23 +99,28 @@ workflow GenerateBatchMetrics {
       runtime_attr_override = runtime_attr_sample_list
   }
 
-  Array[File?] pesr_vcfs_ = [manta_vcf, melt_vcf, scramble_vcf, wham_vcf]
-  Array[String] pesr_algorithms_ = ["manta", "melt", "scramble", "wham"]
-  scatter (i in range(length(pesr_algorithms_))) {
-    if (defined(pesr_vcfs_[i])) {
-      if (pesr_algorithms_[i] == "manta" || pesr_algorithms_[i] == "wham") {
-          File pe_file_ = pe_file
-          File baf_file_ = baf_file
-          File rd_file_ = rd_file
+  Array[File?] vcfs_ = [depth_vcf, manta_vcf, melt_vcf, scramble_vcf, wham_vcf]
+  Array[String] algorithms_ = ["depth", "manta", "melt", "scramble", "wham"]
+  scatter (i in range(length(algorithms_))) {
+    if (defined(vcfs_[i])) {
+      if (algorithms_[i] == "depth" || algorithms_[i] == "manta" || algorithms_[i] == "wham") {
+        File baf_file_ = baf_file
+        File rd_file_ = rd_file
+      }
+      if (algorithms_[i] == "manta" || algorithms_[i] == "wham") {
+        File pe_file_ = pe_file
+      }
+      if (algorithms_[i] == "manta" || algorithms_[i] == "wham" || algorithms_[i] == "melt" || algorithms_[i] == "scramble") {
+        File sr_file_ = sr_file
       }
 
       call gbma.GenerateBatchMetricsAlgorithm {
         input:
-          vcf=select_first([pesr_vcfs_[i]]),
+          vcf=select_first([vcfs_[i]]),
           batch=batch,
-          algorithm=pesr_algorithms_[i],
+          algorithm=algorithms_[i],
           pe_file=pe_file_,
-          sr_file=sr_file,
+          sr_file=sr_file_,
           baf_file=baf_file_,
           rd_file=rd_file_,
           mean_coverage_file=mean_coverage_file,
@@ -124,8 +130,8 @@ workflow GenerateBatchMetrics {
           sample_list = GetSampleIdsFromVcf.out_file,
           male_list = GetSampleLists.male_samples,
           female_list = GetSampleLists.female_samples,
-          records_per_shard_pesr=records_per_shard_pesr,
-          records_per_shard_depth=records_per_shard_depth,
+          records_per_shard_pesr=if defined(sr_file_) then records_per_shard_agg_sr else records_per_shard_agg,
+          records_per_shard_depth=records_per_shard_rdtest,
           additional_gatk_args=additional_gatk_args_agg,
           chr_x=chr_x,
           chr_y=chr_y,
@@ -151,78 +157,10 @@ workflow GenerateBatchMetrics {
     }
   }
 
-  call gbma.GetMaleOnlyVariantIDs as GetMaleOnlyVariantIDsDepth {
-    input:
-      vcf = depth_vcf,
-      female_samples = GetSampleLists.female_samples,
-      male_samples = GetSampleLists.male_samples,
-      contig = select_first([chr_x, "chrX"]),
-      sv_pipeline_docker = sv_pipeline_docker,
-      runtime_attr_override = runtime_attr_get_male_only
-  }
-
-  call rdt.RDTest as RDTestDepth {
-    input:
-      vcf = depth_vcf,
-      algorithm = "depth",
-      coveragefile = rd_file,
-      medianfile = median_file,
-      ped_file = SubsetPedFile.ped_subset_file,
-      autosome_contigs = autosome_contigs,
-      split_size = records_per_shard_depth,
-      flags = "",
-      allosome_contigs = allosome_contigs,
-      ref_dict = reference_dict,
-      batch = batch,
-      samples = GetSampleIdsFromVcf.out_file,
-      male_samples = GetSampleLists.male_samples,
-      female_samples = GetSampleLists.female_samples,
-      male_only_variant_ids = GetMaleOnlyVariantIDsDepth.male_only_variant_ids,
-      sv_pipeline_docker = sv_pipeline_docker,
-      sv_pipeline_rdtest_docker = sv_pipeline_rdtest_docker,
-      linux_docker = linux_docker,
-      runtime_attr_rdtest = runtime_attr_rdtest,
-      runtime_attr_split_rd_vcf = runtime_attr_split_rd_vcf,
-      runtime_attr_merge_allo = runtime_attr_merge_allo,
-      runtime_attr_merge_stats = runtime_attr_merge_stats
-  }
-
-  call gbma.FormatVcfForGatk as FormatVcfForGatkDepth {
-    input:
-      vcf=depth_vcf,
-      ploidy_table=ploidy_table,
-      output_prefix="~{batch}.format_depth",
-      script=svtk_to_gatk_script,
-      sv_pipeline_docker=sv_pipeline_docker,
-      runtime_attr_override=runtime_attr_format
-  }
-  call gbma.SVRegionOverlap as SVRegionOverlapDepth {
-    input:
-      vcf = FormatVcfForGatkDepth.out,
-      vcf_index = FormatVcfForGatkDepth.out_index,
-      reference_dict = reference_dict,
-      output_prefix = "~{batch}.depth_region_overlap",
-      region_files = [segdups, rmsk],
-      region_file_indexes = [segdups + ".tbi", rmsk + ".tbi"],
-      region_names = ["SEGDUP", "RMSK"],
-      java_mem_fraction=java_mem_fraction,
-      gatk_docker = gatk_docker,
-      runtime_attr_override = runtime_attr_annotate_overlap
-  }
-  call gbma.AggregateTests as AggregateTestsDepth {
-    input:
-      vcf = SVRegionOverlapDepth.out,
-      vcf_index = SVRegionOverlapDepth.out_index,
-      prefix = "~{batch}.aggregate_depth",
-      rdtest = RDTestDepth.rdtest,
-      sv_pipeline_docker = sv_pipeline_docker,
-      runtime_attr_override = runtime_attr_merge_stats
-  }
-
   call AggregateCallers {
     input:
       batch = batch,
-      input_metrics = flatten([select_all(GenerateBatchMetricsAlgorithm.out), [AggregateTestsDepth.out]]),
+      input_metrics = select_all(GenerateBatchMetricsAlgorithm.out),
       sv_pipeline_base_docker = sv_pipeline_base_docker,
       runtime_attr_override = runtime_attr_aggregate_callers
   }

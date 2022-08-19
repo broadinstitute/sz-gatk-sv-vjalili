@@ -216,10 +216,23 @@ task AggregateSVEvidence {
 		RuntimeAttr? runtime_attr_override
 	}
 
+
+	parameter_meta {
+		pe_file: {
+							 localization_optional: true
+						 }
+		sr_file: {
+							 localization_optional: true
+						 }
+		baf_file: {
+								localization_optional: true
+							}
+	}
+
 	RuntimeAttr default_attr = object {
-															 cpu_cores: 4,
-															 mem_gb: 15,
-															 disk_gb: ceil(100 + size(vcf, "GB") * 2.5 + size([pe_file, sr_file, baf_file], "GB")),
+															 cpu_cores: 1,
+															 mem_gb: 7.5,
+															 disk_gb: ceil(10 + size(vcf, "GB") * 2.5 + size(sr_file, "GB")),
 															 boot_disk_gb: 10,
 															 preemptible_tries: 3,
 															 max_retries: 1
