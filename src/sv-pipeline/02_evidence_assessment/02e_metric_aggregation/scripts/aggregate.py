@@ -64,8 +64,8 @@ def process_metadata(vcf):
         # List of variants specific to each sample
         called_samples[svtype] = defaultdict(list)
 
-    stats_int = ['SR1Q', 'SR1CS', 'SR2Q', 'SR2CS', 'SRQ', 'SRCS', 'SR1POS', 'SR2POS', 'PEQ', 'PECS', 'PESRQ', 'PESRCS']
-    stats_float = ['BAFDEL', 'BAFDUP']
+    stats_int = ['BAF_KS_QUAL', 'SR1Q', 'SR1CS', 'SR2Q', 'SR2CS', 'SRQ', 'SRCS', 'SR1POS', 'SR2POS', 'PEQ', 'PECS', 'PESRQ', 'PESRCS']
+    stats_float = ['BAF_HET_RATIO', 'BAF_KS_STAT']
     rmsk_field = 'NUM_END_OVERLAPS_RMSK'
     segdup_field = 'OVERLAP_FRAC_SEGDUP'
     metadata = deque()
@@ -115,9 +115,6 @@ def process_metadata(vcf):
     cols.extend(stats_int)
     cols.extend(stats_float)
     metadata = pd.DataFrame(metadata, columns=cols)
-
-    # Invert BAFDEL scores for training
-    # metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL'] = -metadata.loc[metadata['BAFDEL'].notna(), 'BAFDEL']
 
     # Flag variants specific to outlier samples
     metadata['is_outlier_specific'] = False
