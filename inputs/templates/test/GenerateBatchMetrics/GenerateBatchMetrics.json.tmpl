@@ -7,9 +7,8 @@
   "GenerateBatchMetrics.sv_pipeline_base_docker": {{ dockers.sv_pipeline_base_docker | tojson }},
   "GenerateBatchMetrics.linux_docker" : {{ dockers.linux_docker | tojson }},
 
-  "GenerateBatchMetrics.records_per_shard_agg": "100000",
-  "GenerateBatchMetrics.records_per_shard_agg_sr": "10000",
-  "GenerateBatchMetrics.records_per_shard_rdtest": "10000",
+  "GenerateBatchMetrics.records_per_shard_agg": "10000",
+  "GenerateBatchMetrics.records_per_shard_rdtest": "2000",
   "GenerateBatchMetrics.allosome_contigs": {{ reference_resources.allosome_file | tojson }},
   "GenerateBatchMetrics.autosome_contigs": {{ reference_resources.autosome_file | tojson }},
   "GenerateBatchMetrics.rmsk": {{ reference_resources.rmsk | tojson }},
