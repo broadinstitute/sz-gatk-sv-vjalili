@@ -51,8 +51,8 @@ def adjudicate_BAF(metrics, labeler, name):
     print(trainable.loc[trainable.label == 'Fail'].shape)
     print(trainable.loc[trainable.label == 'Unlabeled'].shape)
 
-    features = 'BAF_DUP_STAT BAF_DUP_N'.split()
-    cutoffs = {'indep': ['BAF_DUP_N'], 'dep': ['BAF_DUP_STAT']}
+    features = 'BAF_KS_STAT BAF_KS_Q'.split()
+    cutoffs = {'indep': ['BAF_KS_Q'], 'dep': ['BAF_KS_STAT']}
 
     dup_cutoffs = rf_classify(metrics, trainable, testable, features,
                               labeler, cutoffs, name)
